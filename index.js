@@ -1,0 +1,124 @@
+const express = require("express");
+const cors = require("cors");
+const dotenv = require("dotenv");
+const { MongoClient, ServerApiVersion } = require("mongodb");
+const { spawn } = require("child_process");
+
+// load environmental variables from .env
+dotenv.config();
+const app = express();
+const port = process.env.PORT || 5000;
+// middleware
+app.use(cors());
+app.use(express.json());
+
+//mongoDB connection setup
+const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.zof5niq.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
+
+// Create a MongoClient with a MongoClientOptions object to set the Stable API version
+const client = new MongoClient(uri, {
+  serverApi: {
+    version: ServerApiVersion.v1,
+    strict: true,
+    deprecationErrors: true,
+  },
+});
+
+async function run() {
+  try {
+    // Connect the client to the server	(optional starting in v4.7)
+    await client.connect();
+
+    // Database
+    const db = client.db("SugerSenseDB");
+    const predictionCollection = db.collection("predictions");
+
+    // Send a ping to confirm a successful connection
+    await client.db("admin").command({ ping: 1 });
+    console.log(
+      "Pinged your deployment. You successfully connected to MongoDB!"
+    );
+  } finally {
+    // Ensures that the client will close when you finish/error
+    // await client.close();
+  }
+}
+run().catch(console.dir);
+
+// root route
+app.get("/", (req, res) => {
+  res.send(" SugerSense-Server is running ");
+});
+
+// custom route
+
+// ----------------------------------------------------
+// POST: Predict diabetes using Python model
+app.post("/api/predict", async (req, res) => {
+  try {
+    const inputData = req.body; // 18 features from user
+
+    // Call Python script for prediction
+    const python = spawn("python", [
+      "./python/predictor.py",
+      JSON.stringify(inputData),
+    ]);
+
+    let predictionResult = "";
+
+    python.stdout.on("data", (data) => {
+      predictionResult += data.toString();
+    });
+
+    python.stderr.on("data", (data) => {
+      console.error(`Python error: ${data}`);
+    });
+
+    python.on("close", async (code) => {
+      try {
+        const result = JSON.parse(predictionResult);
+        const prediction = result.prediction || "Unknown";
+
+        // ✅ Store input + result in MongoDB
+        const record = {
+          inputData,
+          prediction,
+          createdAt: new Date(),
+        };
+        await predictionCollection.insertOne(record);
+
+        res.json({
+          success: true,
+          message: "Prediction successful",
+          data: record,
+        });
+      } catch (error) {
+        console.error("Error parsing Python result:", error);
+        res
+          .status(500)
+          .json({ success: false, error: "Failed to process prediction" });
+      }
+    });
+  } catch (err) {
+    console.error("Error:", err);
+    res.status(500).json({ success: false, error: "Server error" });
+  }
+});
+
+// ----------------------------------------------------
+// GET: Admin - all predictions
+app.get("/api/admin/predictions", async (req, res) => {
+  try {
+    const allPredictions = await predictionCollection
+      .find()
+      .sort({ createdAt: -1 })
+      .toArray();
+    res.json(allPredictions);
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to fetch data" });
+  }
+});
+
+app.listen(port, () => {
+  console.log(`SugerSense-Server running on port ${port}`);
+});
