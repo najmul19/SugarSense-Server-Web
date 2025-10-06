@@ -23,7 +23,7 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   },
 });
-
+let predictionCollection;
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
@@ -31,7 +31,7 @@ async function run() {
 
     // Database
     const db = client.db("SugerSenseDB");
-    const predictionCollection = db.collection("predictions");
+    predictionCollection = db.collection("predictions");
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
@@ -52,13 +52,10 @@ app.get("/", (req, res) => {
 
 // custom route
 
-// ----------------------------------------------------
-// POST: Predict diabetes using Python model
 app.post("/api/predict", async (req, res) => {
   try {
-    const inputData = req.body; // 18 features from user
+    const inputData = req.body; //feature
 
-    // Call Python script for prediction
     const python = spawn("python", [
       "./python/predictor.py",
       JSON.stringify(inputData),
@@ -77,14 +74,21 @@ app.post("/api/predict", async (req, res) => {
     python.on("close", async (code) => {
       try {
         const result = JSON.parse(predictionResult);
-        const prediction = result.prediction || "Unknown";
+        const prediction =
+          result.prediction === 1 ? "Diabetic" : "Non-Diabetic";
 
-        // ✅ Store input + result in MongoDB
+        if (!predictionCollection) {
+          return res
+            .status(500)
+            .json({ success: false, error: "Database not initialized" });
+        }
+
         const record = {
-          inputData,
+          ...inputData, 
           prediction,
           createdAt: new Date(),
         };
+
         await predictionCollection.insertOne(record);
 
         res.json({
@@ -105,8 +109,7 @@ app.post("/api/predict", async (req, res) => {
   }
 });
 
-// ----------------------------------------------------
-// GET: Admin - all predictions
+
 app.get("/api/admin/predictions", async (req, res) => {
   try {
     const allPredictions = await predictionCollection

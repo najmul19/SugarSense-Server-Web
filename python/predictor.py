@@ -1,25 +1,32 @@
-import sys
-import json
-
-import sys
-import json
-import numpy as np
+import sys, json, pandas as pd
 import joblib
+import os
+import traceback
+import warnings
+warnings.filterwarnings("ignore")
 
-# Load trained model
-model = joblib.load("python/diabetes_model.pkl") 
+try:
+    BASE_DIR = os.path.dirname(__file__)
+    model = joblib.load(os.path.join(BASE_DIR, "diabetes_model.pkl"))
+    scaler = joblib.load(os.path.join(BASE_DIR, "scaler.pkl"))
 
-# Receive input data from Node.js
-input_json = sys.argv[1]
-data = json.loads(input_json)
+    FEATURE_ORDER = [
+        "GenHlth", "HighBP", "BMI", "Age", "HighChol", "CholCheck", "Income", "Sex",
+        "HeartDiseaseorAttack", "HvyAlcoholConsump", "AnyHealthcare", "DiffWalk",
+        "PhysActivity", "Smoker", "Veggies", "Fruits", "Education", "Stroke"
+    ]
 
-# Convert input to numpy array
-features = np.array([list(data.values())]).astype(float)
+    # input from Node
+    input_data = json.loads(sys.argv[1])
+    df = pd.DataFrame([input_data], columns=FEATURE_ORDER)
 
-# Make prediction
-prediction = model.predict(features)[0]
+    # scale & predict
+    features_scaled = scaler.transform(df)
+    prediction = model.predict(features_scaled)[0]
 
-# Send result back to Node.js
-output = {"prediction": "Diabetic" if prediction == 1 else "Non-Diabetic"}
-print(json.dumps(output))
+    print(json.dumps({"prediction": int(prediction)}))
 
+except Exception as e:
+    # Always return valid JSON even if error occurs
+    print(json.dumps({"prediction": None, "error": str(e), "traceback": traceback.format_exc()}))
+    sys.exit(1)
