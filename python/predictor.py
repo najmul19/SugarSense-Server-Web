@@ -16,17 +16,17 @@ try:
         "PhysActivity", "Smoker", "Veggies", "Fruits", "Education", "Stroke"
     ]
 
-    # input from Node
+    #input from Node
     input_data = json.loads(sys.argv[1])
     df = pd.DataFrame([input_data], columns=FEATURE_ORDER)
 
-    # scale & predict
+    #scale & predict
     features_scaled = scaler.transform(df)
     prediction = model.predict(features_scaled)[0]
 
     print(json.dumps({"prediction": int(prediction)}))
 
 except Exception as e:
-    # Always return valid JSON even if error occurs
+    #Json Return
     print(json.dumps({"prediction": None, "error": str(e), "traceback": traceback.format_exc()}))
     sys.exit(1)

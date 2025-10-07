@@ -104,9 +104,11 @@ app.get("/", (req, res) => {
 
 // custom route
 
-app.post("/api/predict", async (req, res) => {
+app.post("/api/predict", verifyToken, async (req, res) => {
   try {
-    const inputData = req.body; //feature
+    const inputData = req.body;
+    const userEmail = req.query.email;
+    console.log(userEmail);
 
     const python = spawn("python", [
       "./python/predictor.py",
@@ -138,6 +140,7 @@ app.post("/api/predict", async (req, res) => {
         const record = {
           ...inputData,
           prediction,
+          email: userEmail,
           createdAt: new Date(),
         };
 
@@ -161,17 +164,22 @@ app.post("/api/predict", async (req, res) => {
   }
 });
 
-app.get("/api/admin/predictions", verifyToken, verifyAdmin,async (req, res) => {
-  try {
-    const allPredictions = await predictionCollection
-      .find()
-      .sort({ createdAt: -1 })
-      .toArray();
-    res.json(allPredictions);
-  } catch (error) {
-    res.status(500).json({ success: false, message: "Failed to fetch data" });
+app.get(
+  "/api/admin/predictions",
+  verifyToken,
+  verifyAdmin,
+  async (req, res) => {
+    try {
+      const allPredictions = await predictionCollection
+        .find()
+        .sort({ createdAt: -1 })
+        .toArray();
+      res.json(allPredictions);
+    } catch (error) {
+      res.status(500).json({ success: false, message: "Failed to fetch data" });
+    }
   }
-});
+);
 // ==============================================================================
 // user related api
 app.post("/api/users", async (req, res) => {
@@ -199,7 +207,7 @@ app.get("/api/users", verifyToken, verifyAdmin, async (req, res) => {
   }
 });
 
-app.get("/api/users/:email",verifyToken, async (req, res) => {
+app.get("/api/users/:email", verifyToken, async (req, res) => {
   const email = req.params.email;
   try {
     const user = await usersColelction.findOne({ email });
@@ -209,6 +217,30 @@ app.get("/api/users/:email",verifyToken, async (req, res) => {
     res.send(user);
   } catch (error) {
     res.status(500).send({ message: "Failed to fetch user" });
+  }
+});
+
+//Get all predictions
+app.get("/api/predictions", async (req, res) => {
+  try {
+    const email = req.query.email;
+    let predictions;
+
+    if (email) {
+      predictions = await predictionCollection
+        .find({ email })
+        .sort({ createdAt: -1 })
+        .toArray();
+    } else {
+      predictions = await predictionCollection
+        .find({})
+        .sort({ createdAt: -1 })
+        .toArray();
+    }
+
+    res.json(predictions);
+  } catch (error) {
+    res.status(500).json({ message: "Error fetching predictions", error });
   }
 });
 
