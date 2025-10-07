@@ -201,6 +201,29 @@ app.get("/api/admin/dashboard", async (req, res) => {
 });
 
 
+app.get("/api/feature-importance", verifyToken, async (req, res) => {
+  try {
+    const python = spawn("python", ["./python/feature_importance.py"]);
+
+    let output = "";
+    python.stdout.on("data", (data) => (output += data.toString()));
+    python.stderr.on("data", (data) => console.error("Python error:", data.toString()));
+
+    python.on("close", () => {
+      try {
+        if (!output) throw new Error("Python did not return any output");
+        const result = JSON.parse(output);
+        res.json({ success: true, data: result });
+      } catch (err) {
+        res.status(500).json({ success: false, error: err.message, rawOutput: output });
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+
 app.get(
   "/api/admin/predictions",
   verifyToken,
