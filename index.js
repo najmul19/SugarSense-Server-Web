@@ -24,6 +24,7 @@ const client = new MongoClient(uri, {
   },
 });
 let predictionCollection;
+let usersColelction;
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
@@ -31,6 +32,7 @@ async function run() {
 
     // Database
     const db = client.db("SugerSenseDB");
+    usersColelction = db.collection("users");
     predictionCollection = db.collection("predictions");
 
     // Send a ping to confirm a successful connection
@@ -84,7 +86,7 @@ app.post("/api/predict", async (req, res) => {
         }
 
         const record = {
-          ...inputData, 
+          ...inputData,
           prediction,
           createdAt: new Date(),
         };
@@ -109,7 +111,6 @@ app.post("/api/predict", async (req, res) => {
   }
 });
 
-
 app.get("/api/admin/predictions", async (req, res) => {
   try {
     const allPredictions = await predictionCollection
@@ -120,6 +121,15 @@ app.get("/api/admin/predictions", async (req, res) => {
   } catch (error) {
     res.status(500).json({ success: false, message: "Failed to fetch data" });
   }
+});
+app.post("/api/users", async (req, res) => {
+  const user = req.body;
+  const newUser = {
+    ...user,
+    role: "user",
+  };
+  const result = await usersColelction.insertOne(newUser);
+  res.status(201).send(result);
 });
 
 app.listen(port, () => {
