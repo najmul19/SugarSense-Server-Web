@@ -122,6 +122,8 @@ app.get("/api/admin/predictions", async (req, res) => {
     res.status(500).json({ success: false, message: "Failed to fetch data" });
   }
 });
+// ==============================================================================
+// user related api
 app.post("/api/users", async (req, res) => {
   const user = req.body;
   const newUser = {
@@ -131,6 +133,32 @@ app.post("/api/users", async (req, res) => {
   const result = await usersColelction.insertOne(newUser);
   res.status(201).send(result);
 });
+
+app.get("/api/users", async (req, res) => {
+  try {
+    const result = await usersColelction.find().toArray();
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ message: "Failed to fetch users" });
+  }
+});
+
+
+app.get("/api/users/:email", async (req, res) => {
+  const email = req.params.email;
+  try {
+    const user = await usersColelction.findOne({ email });
+    if (!user) {
+      return res.status(404).send({ message: "User not found" });
+    }
+    res.send(user);
+  } catch (error) {
+    res.status(500).send({ message: "Failed to fetch user" });
+  }
+});
+
+
+// =============================================
 
 app.listen(port, () => {
   console.log(`SugerSense-Server running on port ${port}`);
