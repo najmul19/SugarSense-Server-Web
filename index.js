@@ -227,7 +227,7 @@ app.get("/api/feature-importance", verifyToken, async (req, res) => {
 app.get(
   "/api/admin/predictions",
   verifyToken,
-  verifyAdmin,
+ 
   async (req, res) => {
     try {
       const allPredictions = await predictionCollection
