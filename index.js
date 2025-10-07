@@ -164,6 +164,43 @@ app.post("/api/predict", verifyToken, async (req, res) => {
   }
 });
 
+// ----------------------------------------------------
+// GET: Admin Dashboard Summary
+app.get("/api/admin/dashboard", async (req, res) => {
+  try {
+    const totalPredictions = await predictionCollection.countDocuments();
+
+    // Count diabetic vs non-diabetic
+    const diabeticCount = await predictionCollection.countDocuments({
+      prediction: "Diabetic",
+    });
+    const nonDiabeticCount = await predictionCollection.countDocuments({
+      prediction: "Non-Diabetic",
+    });
+
+    // If you store users in Mongo, include this:
+    // const totalUsers = await userCollection.countDocuments();
+    // Otherwise, mock it for now:
+    const totalUsers = 10;
+
+    res.json({
+      success: true,
+      data: {
+        totalUsers,
+        totalPredictions,
+        diabeticCount,
+        nonDiabeticCount,
+      },
+    });
+  } catch (error) {
+    console.error("Dashboard API Error:", error);
+    res
+      .status(500)
+      .json({ message: "Error fetching dashboard data", error });
+  }
+});
+
+
 app.get(
   "/api/admin/predictions",
   verifyToken,
