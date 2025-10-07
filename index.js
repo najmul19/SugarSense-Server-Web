@@ -3,6 +3,8 @@ const cors = require("cors");
 const dotenv = require("dotenv");
 const { MongoClient, ServerApiVersion } = require("mongodb");
 const { spawn } = require("child_process");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
 
 // load environmental variables from .env
 dotenv.config();
@@ -46,6 +48,54 @@ async function run() {
   }
 }
 run().catch(console.dir);
+
+// ------------------------- Auth helpers -------------------------
+
+// Create JWT
+// function createToken(payload) {
+//   const secret = process.env.JWT_SECRET;
+//   const expiresIn = process.env.JWT_EXPIRES_IN || "1h";
+//   return jwt.sign(payload, secret, { expiresIn });
+// }
+
+// jwt related apis
+app.post("/api/jwt", async (req, res) => {
+  const user = req.body;
+  const token = jwt.sign(user, process.env.JWT_SECRET, {
+    expiresIn: "1h",
+  });
+  res.send({ token });
+});
+
+// Custom Middleware for Authorization
+const verifyToken = (req, res, next) => {
+  if (!req.headers.authorization) {
+    return res.status(401).send({ message: "unauthorized Access!" });
+  }
+  const token = req.headers.authorization.split(" ")[1];
+  jwt.verify(token, process.env.JWT_SECRET, (error, decoded) => {
+    if (error) {
+      return res.status(401).send({ message: "unauthorized access" });
+    }
+    req.decoded = decoded;
+    next();
+  });
+};
+
+// use veryfy admin after veryfy token
+const verifyAdmin = async (req, res, next) => {
+  const email = req.decoded.email;
+  const query = { email: email };
+  const user = await usersColelction.findOne(query);
+
+  const isAdmin = user?.role === "admin";
+  if (!isAdmin) {
+    return res.status(403).send({ message: "forbidden access" });
+  }
+  next();
+};
+
+// =====================================================================
 
 // root route
 app.get("/", (req, res) => {
@@ -111,7 +161,7 @@ app.post("/api/predict", async (req, res) => {
   }
 });
 
-app.get("/api/admin/predictions", async (req, res) => {
+app.get("/api/admin/predictions", verifyToken, verifyAdmin,async (req, res) => {
   try {
     const allPredictions = await predictionCollection
       .find()
@@ -129,12 +179,18 @@ app.post("/api/users", async (req, res) => {
   const newUser = {
     ...user,
     role: "user",
+    createdAt: new Date().toISOString(),
   };
+  const query = { email: user.email };
+  const existingUser = await usersColelction.findOne(query);
+  if (existingUser) {
+    return res.send({ message: "user already exist", insertedId: null });
+  }
   const result = await usersColelction.insertOne(newUser);
-  res.status(201).send(result);
+  res.send(result);
 });
 
-app.get("/api/users", async (req, res) => {
+app.get("/api/users", verifyToken, verifyAdmin, async (req, res) => {
   try {
     const result = await usersColelction.find().toArray();
     res.send(result);
@@ -143,8 +199,7 @@ app.get("/api/users", async (req, res) => {
   }
 });
 
-
-app.get("/api/users/:email", async (req, res) => {
+app.get("/api/users/:email",verifyToken, async (req, res) => {
   const email = req.params.email;
   try {
     const user = await usersColelction.findOne({ email });
@@ -156,7 +211,6 @@ app.get("/api/users/:email", async (req, res) => {
     res.status(500).send({ message: "Failed to fetch user" });
   }
 });
-
 
 // =============================================
 
