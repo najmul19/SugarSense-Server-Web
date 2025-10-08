@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: sugarsense-server
+    env: node
+    buildCommand: "npm install"
+    startCommand: "node index.js"
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PYTHONPATH
+        value: ./python
+      - key: DB_USER
+        sync: false
+      - key: DB_PASS
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+    plan: free
