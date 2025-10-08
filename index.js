@@ -5,6 +5,7 @@ const { MongoClient, ServerApiVersion } = require("mongodb");
 const { spawn } = require("child_process");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const { ObjectId } = require("mongodb");
 
 // load environmental variables from .env
 dotenv.config();
@@ -104,85 +105,79 @@ app.get("/", (req, res) => {
 
 // custom route
 
-app.post("/api/predict", verifyToken, async (req, res) => {
-  try {
-    const inputData = req.body;
-    const userEmail = req.query.email;
-    console.log(userEmail);
+// app.post("/api/predict", verifyToken, async (req, res) => {
+//   try {
+//     const inputData = req.body;
+//     const userEmail = req.query.email;
+//     console.log(userEmail);
 
-    const python = spawn("python", [
-      "./python/predictor.py",
-      JSON.stringify(inputData),
-    ]);
+//     const python = spawn("python", [
+//       "./python/predictor.py",
+//       JSON.stringify(inputData),
+//     ]);
 
-    let predictionResult = "";
+//     let predictionResult = "";
 
-    python.stdout.on("data", (data) => {
-      predictionResult += data.toString();
-    });
+//     python.stdout.on("data", (data) => {
+//       predictionResult += data.toString();
+//     });
 
-    python.stderr.on("data", (data) => {
-      console.error(`Python error: ${data}`);
-    });
+//     python.stderr.on("data", (data) => {
+//       console.error(`Python error: ${data}`);
+//     });
 
-    python.on("close", async (code) => {
-      try {
-        const result = JSON.parse(predictionResult);
-        const prediction =
-          result.prediction === 1 ? "Diabetic" : "Non-Diabetic";
+//     python.on("close", async (code) => {
+//       try {
+//         const result = JSON.parse(predictionResult);
+//         const prediction =
+//           result.prediction === 1 ? "Diabetic" : "Non-Diabetic";
 
-        if (!predictionCollection) {
-          return res
-            .status(500)
-            .json({ success: false, error: "Database not initialized" });
-        }
+//         if (!predictionCollection) {
+//           return res
+//             .status(500)
+//             .json({ success: false, error: "Database not initialized" });
+//         }
 
-        const record = {
-          ...inputData,
-          prediction,
-          email: userEmail,
-          createdAt: new Date(),
-        };
+//         const record = {
+//           ...inputData,
+//           prediction,
+//           email: userEmail,
+//           createdAt: new Date(),
+//         };
 
-        await predictionCollection.insertOne(record);
+//         await predictionCollection.insertOne(record);
 
-        res.json({
-          success: true,
-          message: "Prediction successful",
-          data: record,
-        });
-      } catch (error) {
-        console.error("Error parsing Python result:", error);
-        res
-          .status(500)
-          .json({ success: false, error: "Failed to process prediction" });
-      }
-    });
-  } catch (err) {
-    console.error("Error:", err);
-    res.status(500).json({ success: false, error: "Server error" });
-  }
-});
+//         res.json({
+//           success: true,
+//           message: "Prediction successful",
+//           data: record,
+//         });
+//       } catch (error) {
+//         console.error("Error parsing Python result:", error);
+//         res
+//           .status(500)
+//           .json({ success: false, error: "Failed to process prediction" });
+//       }
+//     });
+//   } catch (err) {
+//     console.error("Error:", err);
+//     res.status(500).json({ success: false, error: "Server error" });
+//   }
+// });
 
 // ----------------------------------------------------
 // GET: Admin Dashboard Summary
-app.get("/api/admin/dashboard", async (req, res) => {
+app.get("/api/admin/dashboard",verifyToken,verifyAdmin, async (req, res) => {
   try {
     const totalPredictions = await predictionCollection.countDocuments();
 
-    // Count diabetic vs non-diabetic
     const diabeticCount = await predictionCollection.countDocuments({
       prediction: "Diabetic",
     });
     const nonDiabeticCount = await predictionCollection.countDocuments({
       prediction: "Non-Diabetic",
     });
-
-    // If you store users in Mongo, include this:
-    // const totalUsers = await userCollection.countDocuments();
-    // Otherwise, mock it for now:
-    const totalUsers = 10;
-
+    const totalUsers = await usersColelction.countDocuments();
     res.json({
       success: true,
       data: {
@@ -193,13 +188,10 @@ app.get("/api/admin/dashboard", async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Dashboard API Error:", error);
-    res
-      .status(500)
-      .json({ message: "Error fetching dashboard data", error });
+    // console.error("Dashboard API Error:", error);
+    res.status(500).json({ message: "Error fetching dashboard data", error });
   }
 });
-
 
 app.get("/api/feature-importance", verifyToken, async (req, res) => {
   try {
@@ -207,7 +199,9 @@ app.get("/api/feature-importance", verifyToken, async (req, res) => {
 
     let output = "";
     python.stdout.on("data", (data) => (output += data.toString()));
-    python.stderr.on("data", (data) => console.error("Python error:", data.toString()));
+    // python.stderr.on("data", (data) =>
+      // console.error("Python error:", data.toString())
+    // );
 
     python.on("close", () => {
       try {
@@ -215,7 +209,9 @@ app.get("/api/feature-importance", verifyToken, async (req, res) => {
         const result = JSON.parse(output);
         res.json({ success: true, data: result });
       } catch (err) {
-        res.status(500).json({ success: false, error: err.message, rawOutput: output });
+        res
+          .status(500)
+          .json({ success: false, error: err.message, rawOutput: output });
       }
     });
   } catch (err) {
@@ -223,11 +219,8 @@ app.get("/api/feature-importance", verifyToken, async (req, res) => {
   }
 });
 
-
-app.get(
-  "/api/admin/predictions",
-  verifyToken,
- 
+// for export datsets predictions (CSV)
+app.get("/api/admin/predictions",verifyToken,verifyAdmin,
   async (req, res) => {
     try {
       const allPredictions = await predictionCollection
@@ -242,6 +235,8 @@ app.get(
 );
 // ==============================================================================
 // user related api
+
+// post 
 app.post("/api/users", async (req, res) => {
   const user = req.body;
   const newUser = {
@@ -258,7 +253,7 @@ app.post("/api/users", async (req, res) => {
   res.send(result);
 });
 
-app.get("/api/users", verifyToken, verifyAdmin, async (req, res) => {
+app.get("/api/users", verifyToken, async (req, res) => {
   try {
     const result = await usersColelction.find().toArray();
     res.send(result);
@@ -267,6 +262,7 @@ app.get("/api/users", verifyToken, verifyAdmin, async (req, res) => {
   }
 });
 
+// for check user own data/profile
 app.get("/api/users/:email", verifyToken, async (req, res) => {
   const email = req.params.email;
   try {
@@ -280,8 +276,56 @@ app.get("/api/users/:email", verifyToken, async (req, res) => {
   }
 });
 
-//Get all predictions
-app.get("/api/predictions", async (req, res) => {
+// user management
+app.patch("/api/users/:id/role", verifyToken, verifyAdmin, async (req, res) => {
+  const userId = req.params.id;
+  const { role } = req.body; 
+  // console.log(userId);
+
+  if (!["admin", "user"].includes(role)) {
+    return res.status(400).json({ success: false, message: "Invalid role" });
+  }
+
+  try {
+    const result = await usersColelction.updateOne(
+      { _id: new ObjectId(userId) },
+      { $set: { role } }
+    );
+    // console.log(result.modifiedCount);
+
+    if (result.modifiedCount === 1) {
+      res.json({ success: true, message: `User role updated to ${role}` });
+    } else {
+      res.status(404).json({ success: false, message: "User not found" });
+    }
+  } catch (error) {
+    // console.error("Update role error:", error);
+    res.status(500).json({ success: false, message: "Failed to update role" });
+  }
+});
+
+//admin check for useAdmin/isAdmin
+app.get("/api/users/admin/:email", verifyToken, async (req, res) => {
+  try {
+    const { email } = req.params;
+    const user = await usersColelction.findOne({ email });
+    // console.log(user.role)
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found", isAdmin: false });
+    }
+
+    res.json({ isAdmin: user.role === "admin" });
+  } catch (error) {
+    // console.error("Error in /api/users/admin:", error.message);
+    res.status(500).json({ message: "Server error", isAdmin: false });
+  }
+});
+
+
+
+//Get all predictions for individuals hstory
+app.get("/api/predictions",verifyToken, async (req, res) => {
   try {
     const email = req.query.email;
     let predictions;
