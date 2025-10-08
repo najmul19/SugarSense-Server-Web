@@ -104,69 +104,71 @@ app.get("/", (req, res) => {
 });
 
 // custom route
+// prediction psot api
+app.post("/api/predict", verifyToken, async (req, res) => {
+  try {
+    const inputData = req.body;
+    const userEmail = req.query.email;
+    console.log(userEmail);
 
-// app.post("/api/predict", verifyToken, async (req, res) => {
-//   try {
-//     const inputData = req.body;
-//     const userEmail = req.query.email;
-//     console.log(userEmail);
+    const python = spawn("python", [
+      "./python/predictor.py",
+      JSON.stringify(inputData),
+    ]);
 
-//     const python = spawn("python", [
-//       "./python/predictor.py",
-//       JSON.stringify(inputData),
-//     ]);
+    let predictionResult = "";
 
-//     let predictionResult = "";
+    python.stdout.on("data", (data) => {
+      predictionResult += data.toString();
+    });
 
-//     python.stdout.on("data", (data) => {
-//       predictionResult += data.toString();
-//     });
+    python.stderr.on("data", (data) => {
+      console.error(`Python error: ${data}`);
+    });
 
-//     python.stderr.on("data", (data) => {
-//       console.error(`Python error: ${data}`);
-//     });
+    python.on("close", async (code) => {
+      try {
+        const result = JSON.parse(predictionResult);
+        const prediction =
+          result.prediction === 1 ? "Diabetic" : "Non-Diabetic";
 
-//     python.on("close", async (code) => {
-//       try {
-//         const result = JSON.parse(predictionResult);
-//         const prediction =
-//           result.prediction === 1 ? "Diabetic" : "Non-Diabetic";
+        if (!predictionCollection) {
+          return res
+            .status(500)
+            .json({ success: false, error: "Database not initialized" });
+        }
 
-//         if (!predictionCollection) {
-//           return res
-//             .status(500)
-//             .json({ success: false, error: "Database not initialized" });
-//         }
+        const record = {
+          ...inputData,
+          prediction,
+          email: userEmail,
+          createdAt: new Date(),
+        };
 
-//         const record = {
-//           ...inputData,
-//           prediction,
-//           email: userEmail,
-//           createdAt: new Date(),
-//         };
+        await predictionCollection.insertOne(record);
 
-//         await predictionCollection.insertOne(record);
-
-//         res.json({
-//           success: true,
-//           message: "Prediction successful",
-//           data: record,
-//         });
-//       } catch (error) {
-//         console.error("Error parsing Python result:", error);
-//         res
-//           .status(500)
-//           .json({ success: false, error: "Failed to process prediction" });
-//       }
-//     });
-//   } catch (err) {
-//     console.error("Error:", err);
-//     res.status(500).json({ success: false, error: "Server error" });
-//   }
-// });
+        res.json({
+          success: true,
+          message: "Prediction successful",
+          data: record,
+        });
+      } catch (error) {
+        console.error("Error parsing Python result:", error);
+        res
+          .status(500)
+          .json({ success: false, error: "Failed to process prediction" });
+      }
+    });
+  } catch (err) {
+    console.error("Error:", err);
+    res.status(500).json({ success: false, error: "Server error" });
+  }
+});
 
 // ----------------------------------------------------
 // GET: Admin Dashboard Summary
+
+
 app.get("/api/admin/dashboard",verifyToken,verifyAdmin, async (req, res) => {
   try {
     const totalPredictions = await predictionCollection.countDocuments();
