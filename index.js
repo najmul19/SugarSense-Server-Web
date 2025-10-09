@@ -11,6 +11,17 @@ const { ObjectId } = require("mongodb");
 dotenv.config();
 const app = express();
 const port = process.env.PORT || 5000;
+
+// ---------------------------------------------------------------------------------------------------------------
+
+const OpenAI = require("openai");
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+  baseURL: "https://openrouter.ai/api/v1",
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+
 // middleware
 app.use(cors());
 app.use(express.json());
@@ -28,6 +39,7 @@ const client = new MongoClient(uri, {
 });
 let predictionCollection;
 let usersColelction;
+let chatCollection;
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
@@ -37,6 +49,7 @@ async function run() {
     const db = client.db("SugerSenseDB");
     usersColelction = db.collection("users");
     predictionCollection = db.collection("predictions");
+    chatCollection = db.collection("chats");
 
     // Send a ping to confirm a successful connection
     // await client.db("admin").command({ ping: 1 });
@@ -109,7 +122,7 @@ app.post("/api/predict", verifyToken, async (req, res) => {
   try {
     const inputData = req.body;
     const userEmail = req.query.email;
-    console.log(userEmail);
+    // console.log(userEmail);
 
     const python = spawn("python", [
       "./python/predictor.py",
@@ -166,10 +179,9 @@ app.post("/api/predict", verifyToken, async (req, res) => {
 });
 
 // ----------------------------------------------------
-// GET: Admin Dashboard Summary
+// GETAdmin Dashboard Summary
 
-
-app.get("/api/admin/dashboard",verifyToken,verifyAdmin, async (req, res) => {
+app.get("/api/admin/dashboard", verifyToken, verifyAdmin, async (req, res) => {
   try {
     const totalPredictions = await predictionCollection.countDocuments();
 
@@ -202,7 +214,7 @@ app.get("/api/feature-importance", verifyToken, async (req, res) => {
     let output = "";
     python.stdout.on("data", (data) => (output += data.toString()));
     // python.stderr.on("data", (data) =>
-      // console.error("Python error:", data.toString())
+    // console.error("Python error:", data.toString())
     // );
 
     python.on("close", () => {
@@ -222,7 +234,10 @@ app.get("/api/feature-importance", verifyToken, async (req, res) => {
 });
 
 // for export datsets predictions (CSV)
-app.get("/api/admin/predictions",verifyToken,verifyAdmin,
+app.get(
+  "/api/admin/predictions",
+  verifyToken,
+  verifyAdmin,
   async (req, res) => {
     try {
       const allPredictions = await predictionCollection
@@ -238,7 +253,7 @@ app.get("/api/admin/predictions",verifyToken,verifyAdmin,
 // ==============================================================================
 // user related api
 
-// post 
+// post
 app.post("/api/users", async (req, res) => {
   const user = req.body;
   const newUser = {
@@ -281,7 +296,7 @@ app.get("/api/users/:email", verifyToken, async (req, res) => {
 // user management
 app.patch("/api/users/:id/role", verifyToken, verifyAdmin, async (req, res) => {
   const userId = req.params.id;
-  const { role } = req.body; 
+  const { role } = req.body;
   // console.log(userId);
 
   if (!["admin", "user"].includes(role)) {
@@ -314,7 +329,9 @@ app.get("/api/users/admin/:email", verifyToken, async (req, res) => {
     // console.log(user.role)
 
     if (!user) {
-      return res.status(404).json({ message: "User not found", isAdmin: false });
+      return res
+        .status(404)
+        .json({ message: "User not found", isAdmin: false });
     }
 
     res.json({ isAdmin: user.role === "admin" });
@@ -324,10 +341,8 @@ app.get("/api/users/admin/:email", verifyToken, async (req, res) => {
   }
 });
 
-
-
 //Get all predictions for individuals hstory
-app.get("/api/predictions",verifyToken, async (req, res) => {
+app.get("/api/predictions", verifyToken, async (req, res) => {
   try {
     const email = req.query.email;
     let predictions;
@@ -351,6 +366,117 @@ app.get("/api/predictions",verifyToken, async (req, res) => {
 });
 
 // =============================================
+
+// --------------------------------------------------------------------------------------------------------------
+
+// Chatbot API---posting context 
+app.post("/api/chatbot", verifyToken, async (req, res) => {
+  const { email } = req.query;
+  const { message } = req.body;
+
+  // console.log("User email:", email);
+  // console.log("Message:", message);
+
+  if (!email || !message) {
+    return res.status(400).json({ message: "Email and message are required" });
+  }
+
+  try {
+    //fetch last 5 msg for know user context/mind
+    const recentChats = await chatCollection
+      .find({ email })
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .toArray();
+
+    // for AI prepered it
+    const chatHistory = recentChats
+      .reverse()
+      .map((chat) => [
+        { role: "user", content: chat.message },
+        { role: "assistant", content: chat.reply },
+      ])
+      .flat();
+
+    //Send it to OpenAI via OpenRouter
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: `
+        You are SugarSense AI — a friendly, knowledgeable health assistant focused on diabetes awareness and prevention. 
+        Always respond in short, clear, and easy-to-understand English. 
+        Be empathetic, supportive, and motivational when giving advice.
+
+        Key points:
+        - Give practical health and lifestyle tips for preventing and managing diabetes.
+        - Encourage healthy habits: balanced diet, regular exercise, and stress control.
+        - Avoid medical diagnosis or prescriptions — instead, suggest consulting a doctor.
+        - When sharing Bangladeshi health resources, include this verified source:
+          https://www.badas.org.bd (Bangladesh Diabetes Association).
+        - Keep answers under 5 lines unless the user asks for more details.
+        `,
+        },
+        ...chatHistory,
+        { role: "user", content: message },
+      ],
+    });
+
+    const reply = completion.choices[0].message.content;
+
+    // save coneversation for furhter rembering
+    await chatCollection.insertOne({
+      email,
+      message,
+      reply,
+      createdAt: new Date(),
+    });
+
+    // the final reply for user
+    res.json({ success: true, reply });
+  } catch (error) {
+    // console.error("Chatbot Error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message || "AI response failed",
+    });
+  }
+});
+
+// get chat history-------------------------------------
+app.get("/api/chatbot/history", verifyToken, async (req, res) => {
+  try {
+    const userEmail = req.decoded.email;
+    const chats = await chatCollection
+      .find({ email: userEmail })
+      .sort({ createdAt: 1 }) // old to new
+      .toArray();
+
+    res.json({ success: true, data: chats });
+  } catch (error) {
+    // console.error("Fetch Chat History Error:", error);
+    res
+      .status(500)
+      .json({ success: false, error: "Failed to fetch chat history" });
+  }
+});
+
+// ---------------for testing api is correct------------------
+
+// app.get("/test-ai", async (req, res) => {
+//   try {
+//     const response = await openai.chat.completions.create({
+//       model: "gpt-4o-mini",
+//       messages: [{ role: "user", content: "Hello AI!" }],
+//     });
+//     res.json({ success: true, data: response.choices[0].message });
+//   } catch (error) {
+//     res.json({ success: false, error: error.message });
+//   }
+// });
+
+// ------------------------------------------------------------------------------------------------------
 
 app.listen(port, () => {
   console.log(`SugerSense-Server running on port ${port}`);
