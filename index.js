@@ -40,6 +40,7 @@ const client = new MongoClient(uri, {
 let predictionCollection;
 let usersColelction;
 let chatCollection;
+let feedbackCollection;
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
@@ -50,6 +51,7 @@ async function run() {
     usersColelction = db.collection("users");
     predictionCollection = db.collection("predictions");
     chatCollection = db.collection("chats");
+    feedbackCollection = db.collection("feedback");
 
     // Send a ping to confirm a successful connection
     // await client.db("admin").command({ ping: 1 });
@@ -365,11 +367,105 @@ app.get("/api/predictions", verifyToken, async (req, res) => {
   }
 });
 
+// for delte historry fo prediction
+app.delete("/api/predictions/:id", verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await predictionCollection.deleteOne({
+      _id: new ObjectId(id),
+    });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ message: "Prediction not found" });
+    }
+
+    res.json({ message: "Prediction deleted successfully" });
+  } catch (error) {
+    res.status(500).json({ message: "Error deleting prediction", error });
+  }
+});
+
+// ------------------feadback related APis-------------------
+
+app.post("/api/feedback", verifyToken, async (req, res) => {
+  try {
+    const { name, email, message } = req.body;
+    const newFeedback = {
+      name,
+      email,
+      message,
+      createdAt: new Date(),
+    };
+    const result = await feedbackCollection.insertOne(newFeedback);
+    res.status(201).json(result);
+  } catch (error) {
+    res.status(500).json({ message: "Error submitting feedback", error });
+  }
+});
+
+app.get("/api/feedback", async (req, res) => {
+  try {
+    const email = req.query.email;
+    let feedback;
+
+    if (email) {
+      feedback = await feedbackCollection
+        .find({ email })
+        .sort({ createdAt: -1 })
+        .toArray();
+    } else {
+      feedback = await feedbackCollection
+        .find({})
+        .sort({ createdAt: -1 })
+        .toArray();
+    }
+
+    res.json(feedback);
+  } catch (error) {
+    res.status(500).json({ message: "Error fetching feedback", error });
+  }
+});
+
+// feedabck delet api--------------------
+
+app.delete("/api/feedback/:id", verifyToken, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const userEmail = req.decoded.email;
+
+    const user = await usersColelction.findOne({ email: userEmail });
+    const feedback = await feedbackCollection.findOne({
+      _id: new ObjectId(id),
+    });
+
+    if (!feedback) {
+      return res.status(404).json({ message: "Feedback not found" });
+    }
+
+    if (user?.role === "admin" || feedback.email === userEmail) {
+      const result = await feedbackCollection.deleteOne({
+        _id: new ObjectId(id),
+      });
+      return res
+        .status(200)
+        .json({ message: "Feedback deleted successfully", result });
+    } else {
+      return res
+        .status(403)
+        .json({ message: "Not authorized to delete this feedback" });
+    }
+  } catch (error) {
+    console.error("Error deleting feedback:", error);
+    res.status(500).json({ message: "Error deleting feedback", error });
+  }
+});
+
 // =============================================
 
 // --------------------------------------------------------------------------------------------------------------
 
-// Chatbot API---posting context 
+// Chatbot API---posting context
 app.post("/api/chatbot", verifyToken, async (req, res) => {
   const { email } = req.query;
   const { message } = req.body;
@@ -405,18 +501,25 @@ app.post("/api/chatbot", verifyToken, async (req, res) => {
         {
           role: "system",
           content: `
-        You are SugarSense AI — a friendly, knowledgeable health assistant focused on diabetes awareness and prevention. 
-        Always respond in short, clear, and easy-to-understand English. 
-        Be empathetic, supportive, and motivational when giving advice.
+            You are SugarSense AI — a friendly, knowledgeable health assistant focused on diabetes awareness and prevention. 
+            Always respond in short, clear, and easy-to-understand English. 
+            Be empathetic, supportive, and motivational when giving advice.
 
-        Key points:
-        - Give practical health and lifestyle tips for preventing and managing diabetes.
-        - Encourage healthy habits: balanced diet, regular exercise, and stress control.
-        - Avoid medical diagnosis or prescriptions — instead, suggest consulting a doctor.
-        - When sharing Bangladeshi health resources, include this verified source:
-          https://www.badas.org.bd (Bangladesh Diabetes Association).
-        - Keep answers under 5 lines unless the user asks for more details.
-        `,
+            Key points:
+            - Give practical health and lifestyle tips for preventing and managing diabetes.
+            - Encourage healthy habits: balanced diet, regular exercise, and stress control.
+            - Avoid medical diagnosis or prescriptions — instead, suggest consulting a doctor.
+            - When sharing Bangladeshi health resources, include this verified source:
+              https://www.badas.org.bd (Bangladesh Diabetes Association).
+            - Keep answers under 5 lines unless the user asks for more details.
+
+          Developer info:
+          - Developed by MD. Najmul Islam
+          - B.Sc in Computer Science & Engineering (CSE) from Leading University
+          - Passionate about health tech and AI applications
+          - Entrepreneur and software developer with a focus on practical solutions
+            for diabetes awareness and prevention.
+          `,
         },
         ...chatHistory,
         { role: "user", content: message },
